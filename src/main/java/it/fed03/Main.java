@@ -7,7 +7,9 @@ import it.unifi.cassandra.scheduling.model.*;
 import it.unifi.cassandra.scheduling.solver.CSPSchedulabilityAnalysis;
 import it.unifi.cassandra.scheduling.solver.FEDScheduleGenerator;
 import it.unifi.cassandra.scheduling.solver.edf.EDFSchedulabilityAnalysis;
+import it.unifi.cassandra.scheduling.solver.edf.EDFScheduleGenerator;
 import it.unifi.cassandra.scheduling.util.TimeInterval;
+import it.unifi.cassandra.scheduling.util.WorkingDays;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,40 +17,33 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class Main {
 
     public static void main(String[] args) {
         Set<Requirement> requirements = highDemand();
-        Problem p = new Problem(requirements, 8, new CSPSchedulabilityAnalysis(), new FEDScheduleGenerator());
+        Problem p = new Problem(requirements, 8, new EDFSchedulabilityAnalysis(), new EDFScheduleGenerator());
+        Map<Person, Set<Allocation>> allocByPerson = p.generateSchedule().stream().collect(Collectors.groupingBy(Allocation::getPerson, Collectors.toSet()));
+        Map<Person, Map<Assertion, Map<TimeInterval, Integer>>> data = allocByPerson.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> {
+            Map<Assertion, List<Allocation>> tmp = e.getValue().stream().collect(Collectors.groupingBy(Allocation::assertion));
+            return tmp.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, listAll -> adjustAlloc(listAll.getValue())));
+        }));
 
-        System.out.print(p.verifyAssertions());
-//        p.generateSchedule();
+//        System.out.print(p.verifyAssertions());
 //
-//        GsonBuilder gson = new GsonBuilder();
-//        gson.registerTypeAdapter(Allocation.class, new AllocationSerializer());
-//        gson.registerTypeAdapter(Assertion.class, new AssertionSerializer());
-//        gson.registerTypeAdapter(Requirement.class, new RequirementSerializer());
-//        Gson ser = gson.create();
-//        String result = String.format("{%s}", ser.toJson(requirements));
+//        GsonBuilder gsonBuilder = new GsonBuilder();
+//        gsonBuilder.registerTypeAdapter(Allocation.class, new AllocationSerializer());
+//        gsonBuilder.registerTypeAdapter(Assertion.class, new AssertionSerializer());
+//        gsonBuilder.registerTypeAdapter(Requirement.class, new RequirementSerializer());
+//        Gson gson = gsonBuilder.create();
+//        String result = gson.toJson(requirements);
 //
 //        try {
 //            Files.write(Paths.get(args[0]), result.getBytes(), StandardOpenOption.CREATE);
 //        } catch (IOException e) {
 //            e.printStackTrace();
 //        }
-
-
-////        boolean isF = p.verifyAssertions();
-//        List<Allocation> res3Alloc = p.generateSchedule().stream().filter(allocation -> {
-//            return ((Researcher)allocation.getPerson()).name == "researcher3";
-//        }).collect(Collectors.toList());
-//
-//
-//        Map<Assertion, List<Allocation>> byass = res3Alloc.stream().collect(Collectors.groupingBy(Allocation::assertion));
-//        Map<Assertion, Map<TimeInterval, Integer>> al = byass.entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> {
-//            return adjustAlloc(e.getValue());
-//        }));
     }
 
     public static Set<Requirement> highDemand() {
@@ -481,12 +476,16 @@ public class Main {
         for (int i = 1; i < allocations.size(); i++) {
             Allocation item = allocations.get(i);
             Allocation lastAlloc = allocations.get(i - 1);
-            if ((!lastAlloc.getDay().plusDays(1).isEqual(item.getDay())) || lastAlloc.getHoursAmount() != item.getHoursAmount()) {
+            LocalDate nextWorkingDay = WorkingDays.nthWorkingDayFrom(2, lastAlloc.getDay());
+            if ((!nextWorkingDay.isEqual(item.getDay())) || lastAlloc.getHoursAmount() != item.getHoursAmount()) {
                 TimeInterval interval = new TimeInterval(allocations.get(firstIndex).getDay(), lastAlloc.getDay().plusDays(1));
                 result.put(interval, lastAlloc.getHoursAmount());
                 firstIndex = i;
             }
         }
+
+        TimeInterval interval = new TimeInterval(allocations.get(firstIndex).getDay(), allocations.get(allocations.size()-1).getDay().plusDays(1));
+        result.put(interval, allocations.get(firstIndex).getHoursAmount());
 
         return result;
     }
