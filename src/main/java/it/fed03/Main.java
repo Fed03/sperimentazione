@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import it.unifi.cassandra.scheduling.Problem;
 import it.unifi.cassandra.scheduling.model.*;
+import it.unifi.cassandra.scheduling.solver.CSPSchedulabilityAnalysis;
 import it.unifi.cassandra.scheduling.solver.FEDScheduleGenerator;
 import it.unifi.cassandra.scheduling.solver.edf.EDFSchedulabilityAnalysis;
 import it.unifi.cassandra.scheduling.util.TimeInterval;
@@ -19,21 +20,23 @@ public class Main {
 
     public static void main(String[] args) {
         Set<Requirement> requirements = highDemand();
-        Problem p = new Problem(requirements, 8, new EDFSchedulabilityAnalysis(), new FEDScheduleGenerator());
-        p.generateSchedule();
+        Problem p = new Problem(requirements, 8, new CSPSchedulabilityAnalysis(), new FEDScheduleGenerator());
 
-        GsonBuilder gson = new GsonBuilder();
-        gson.registerTypeAdapter(Allocation.class, new AllocationSerializer());
-        gson.registerTypeAdapter(Assertion.class, new AssertionSerializer());
-        gson.registerTypeAdapter(Requirement.class, new RequirementSerializer());
-        Gson ser = gson.create();
-        String result = String.format("{%s}", ser.toJson(requirements));
-
-        try {
-            Files.write(Paths.get(args[0]), result.getBytes(), StandardOpenOption.CREATE);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        System.out.print(p.verifyAssertions());
+//        p.generateSchedule();
+//
+//        GsonBuilder gson = new GsonBuilder();
+//        gson.registerTypeAdapter(Allocation.class, new AllocationSerializer());
+//        gson.registerTypeAdapter(Assertion.class, new AssertionSerializer());
+//        gson.registerTypeAdapter(Requirement.class, new RequirementSerializer());
+//        Gson ser = gson.create();
+//        String result = String.format("{%s}", ser.toJson(requirements));
+//
+//        try {
+//            Files.write(Paths.get(args[0]), result.getBytes(), StandardOpenOption.CREATE);
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
 
 
 ////        boolean isF = p.verifyAssertions();
