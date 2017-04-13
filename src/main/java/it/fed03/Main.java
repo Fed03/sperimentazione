@@ -2,6 +2,7 @@ package it.fed03;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
 import it.unifi.cassandra.scheduling.Problem;
 import it.unifi.cassandra.scheduling.model.*;
 import it.unifi.cassandra.scheduling.solver.CSPSchedulabilityAnalysis;
@@ -12,6 +13,7 @@ import it.unifi.cassandra.scheduling.util.TimeInterval;
 import it.unifi.cassandra.scheduling.util.WorkingDays;
 
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
@@ -32,18 +34,23 @@ public class Main {
 
 //        System.out.print(p.verifyAssertions());
 //
-//        GsonBuilder gsonBuilder = new GsonBuilder();
-//        gsonBuilder.registerTypeAdapter(Allocation.class, new AllocationSerializer());
-//        gsonBuilder.registerTypeAdapter(Assertion.class, new AssertionSerializer());
-//        gsonBuilder.registerTypeAdapter(Requirement.class, new RequirementSerializer());
-//        Gson gson = gsonBuilder.create();
-//        String result = gson.toJson(requirements);
-//
-//        try {
-//            Files.write(Paths.get(args[0]), result.getBytes(), StandardOpenOption.CREATE);
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
+        GsonBuilder gsonBuilder = new GsonBuilder();
+        Type fooType = new TypeToken<Map<Person, Map<Assertion, Map<TimeInterval, Integer>>>>() {}.getType();
+        gsonBuilder.registerTypeAdapter(Allocation.class, new AllocationSerializer());
+        gsonBuilder.registerTypeAdapter(Assertion.class, new AssertionSerializer());
+        gsonBuilder.registerTypeAdapter(Requirement.class, new RequirementSerializer());
+        gsonBuilder.registerTypeAdapter(TimeInterval.class, new TimeIntervalSerializer());
+        gsonBuilder.registerTypeAdapter(new TypeToken<Map<Person, Map<Assertion, Map<TimeInterval, Integer>>>>() {}.getType(), new MapSerializer());
+        gsonBuilder.registerTypeAdapter(new TypeToken<Map<Assertion, Map<TimeInterval, Integer>>>() {}.getType(), new AssertionMapSerializer());
+        gsonBuilder.registerTypeAdapter(new TypeToken<Map<TimeInterval, Integer>>() {}.getType(), new AllocMapSerializer());
+        Gson gson = gsonBuilder.create();
+        String result = gson.toJson(data, fooType);
+////
+        try {
+            Files.write(Paths.get(args[0]), result.getBytes(), StandardOpenOption.CREATE);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public static Set<Requirement> highDemand() {
