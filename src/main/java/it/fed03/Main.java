@@ -1,24 +1,40 @@
 package it.fed03;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
 import it.unifi.cassandra.scheduling.Problem;
 import it.unifi.cassandra.scheduling.model.*;
-import it.unifi.cassandra.scheduling.solver.CSPSchedulabilityAnalysis;
 import it.unifi.cassandra.scheduling.solver.FEDScheduleGenerator;
 import it.unifi.cassandra.scheduling.solver.edf.EDFSchedulabilityAnalysis;
 import it.unifi.cassandra.scheduling.solver.edf.EDFScheduleGenerator;
+import it.unifi.cassandra.scheduling.util.ScheduleManager;
 import it.unifi.cassandra.scheduling.util.TimeInterval;
 import it.unifi.cassandra.scheduling.util.WorkingDays;
+import org.jfree.chart.ChartFactory;
+import org.jfree.chart.ChartFrame;
+import org.jfree.chart.ChartUtilities;
+import org.jfree.chart.JFreeChart;
+import org.jfree.chart.axis.DateAxis;
+import org.jfree.chart.axis.DateTickUnit;
+import org.jfree.chart.axis.DateTickUnitType;
+import org.jfree.chart.plot.XYPlot;
+import org.jfree.chart.renderer.xy.XYItemRenderer;
+import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
+import org.jfree.data.time.Day;
+import org.jfree.data.time.RegularTimePeriod;
+import org.jfree.data.time.TimeSeries;
+import org.jfree.data.time.TimeSeriesCollection;
 
+import java.awt.*;
+import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Type;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
+import java.text.SimpleDateFormat;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
+import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class Main {
@@ -26,34 +42,58 @@ public class Main {
     public static void main(String[] args) {
         Set<Requirement> requirements = highDemand();
         Problem p = new Problem(requirements, 8, new EDFSchedulabilityAnalysis(), new EDFScheduleGenerator());
-        Map<Person, Set<Allocation>> allocByPerson = p.generateSchedule().stream().collect(Collectors.groupingBy(Allocation::getPerson, Collectors.toSet()));
-        Map<Person, Map<Assertion, Map<TimeInterval, Integer>>> data = allocByPerson.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> {
-            Map<Assertion, List<Allocation>> tmp = e.getValue().stream().collect(Collectors.groupingBy(Allocation::assertion));
-            return tmp.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, listAll -> adjustAlloc(listAll.getValue())));
-        }));
+        List<Allocation> allocations = new ArrayList<>(p.generateSchedule());
 
-//        System.out.print(p.verifyAssertions());
-//
-        GsonBuilder gsonBuilder = new GsonBuilder();
-        Type fooType = new TypeToken<Map<Person, Map<Assertion, Map<TimeInterval, Integer>>>>() {}.getType();
-        gsonBuilder.registerTypeAdapter(Allocation.class, new AllocationSerializer());
-        gsonBuilder.registerTypeAdapter(Assertion.class, new AssertionSerializer());
-        gsonBuilder.registerTypeAdapter(Requirement.class, new RequirementSerializer());
-        gsonBuilder.registerTypeAdapter(TimeInterval.class, new TimeIntervalSerializer());
-        gsonBuilder.registerTypeAdapter(new TypeToken<Map<Person, Map<Assertion, Map<TimeInterval, Integer>>>>() {}.getType(), new MapSerializer());
-        gsonBuilder.registerTypeAdapter(new TypeToken<Map<Assertion, Map<TimeInterval, Integer>>>() {}.getType(), new AssertionMapSerializer());
-        gsonBuilder.registerTypeAdapter(new TypeToken<Map<TimeInterval, Integer>>() {}.getType(), new AllocMapSerializer());
-        Gson gson = gsonBuilder.create();
-        String result = gson.toJson(data, fooType);
-////
+        allocations.sort(Comparator.comparing(Allocation::getDay));
+        List<Allocation> allocationsSplit = allocations.subList(0, (int) Math.ceil(allocations.size() * 0.52));
+        List<Person> people = allocationsSplit.stream().map(Allocation::getPerson).distinct().collect(Collectors.toList());
+        people.forEach(person -> {
+            JFreeChart chart = generatePersonWorkedHours(allocationsSplit, person);
+            saveChartToImage(chart, args[0]);
+        });
+
+        requirements.forEach(requirement -> {
+            JFreeChart chart = generateRequirementWorkedHours(allocations, requirement);
+            saveChartToImage(chart, args[0]);
+        });
+
+        JFreeChart chart = generateTotalWorkedHours(allocations);
+        saveChartToImage(chart, args[0]);
+    }
+
+    private static void saveChartToImage(JFreeChart chart, String folder) {
+        Path folderPath = Paths.get(folder);
+        if (!Files.exists(folderPath)) {
+            try {
+                Files.createDirectories(folderPath);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        String imageName = chart.getTitle().getText().toLowerCase().replace(" ", "_");
+        File image = Paths.get(folder, imageName+".jpg").toFile();
+        int width = 800;
+        int height = 480;
         try {
-            Files.write(Paths.get(args[0]), result.getBytes(), StandardOpenOption.CREATE);
+            ChartUtilities.saveChartAsJPEG(image,1f, chart,width,height);
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    public static Set<Requirement> highDemand() {
+    private static JFreeChart generateTotalWorkedHours(List<Allocation> allocations) {
+        ScheduleManager scheduleManager = new ScheduleManager(allocations);
+        Map<Person, Map<LocalDate, Integer>> peopleWorkedHours = scheduleManager.peopleTotalWorkedHours();
+        Map<LocalDate, Integer> totalWorkedHours = scheduleManager.totalWorkedHours();
+
+        TimeSeriesCollection peopleWorkedHoursDataset = generateDataset(Person::getIdentifier, peopleWorkedHours);
+        TimeSeries totalWorkedHoursDataset = createTimeSeries("Total amount", totalWorkedHours);
+
+        return buildChart("Total worked hours by researcher", peopleWorkedHoursDataset, totalWorkedHoursDataset);
+    }
+
+    private static Set<Requirement> highDemand() {
         Person researcher1 = new Researcher("researcher1");
         Person researcher2 = new Researcher("researcher2");
         Person researcher3 = new Researcher("researcher3");
@@ -475,26 +515,84 @@ public class Main {
         return new HashSet<>(Arrays.asList(proj1, proj2, proj3, proj4, proj5, proj6, proj7, proj8, proj9, proj10, proj11, proj12, proj13, proj14, proj15, proj16, proj17));
     }
 
-    public static Map<TimeInterval, Integer> adjustAlloc(List<Allocation> allocations) {
-        allocations.sort(Comparator.comparing(Allocation::getDay));
-        Map<TimeInterval, Integer> result = new HashMap<>();
-        int firstIndex = 0;
+    private static JFreeChart generateRequirementWorkedHours(List<Allocation> allocations, Requirement requirement) {
+        ScheduleManager scheduleManager = new ScheduleManager(allocations);
+        Map<Person, Map<LocalDate, Integer>> peopleWorkedHours = scheduleManager.peopleWorkedHoursByRequirement(requirement);
+        Map<LocalDate, Integer> totalWorkedHoursByRequirement = scheduleManager.totalWorkedHoursByRequirement(requirement);
 
-        for (int i = 1; i < allocations.size(); i++) {
-            Allocation item = allocations.get(i);
-            Allocation lastAlloc = allocations.get(i - 1);
-            LocalDate nextWorkingDay = WorkingDays.nthWorkingDayFrom(2, lastAlloc.getDay());
-            if ((!nextWorkingDay.isEqual(item.getDay())) || lastAlloc.getHoursAmount() != item.getHoursAmount()) {
-                TimeInterval interval = new TimeInterval(allocations.get(firstIndex).getDay(), lastAlloc.getDay().plusDays(1));
-                result.put(interval, lastAlloc.getHoursAmount());
-                firstIndex = i;
-            }
+        TimeSeriesCollection peopleWorkedHoursDataset = generateDataset(Person::getIdentifier, peopleWorkedHours);
+        TimeSeries totalWorkedHoursDataset = createTimeSeries(requirement.name(), totalWorkedHoursByRequirement);
+
+        return buildChart(requirement.name() + " worked hours by researcher", peopleWorkedHoursDataset, totalWorkedHoursDataset);
+    }
+
+    private static JFreeChart generatePersonWorkedHours(List<Allocation> allocations, Person person) {
+        ScheduleManager scheduleManager = new ScheduleManager(allocations);
+        Map<Requirement, Map<LocalDate, Integer>> requirementsWorkedHours = scheduleManager.peopleWorkedHoursGroupedByRequirement(person);
+        Map<LocalDate, Integer> totalWorkedHoursByPerson = scheduleManager.personWorkedHours(person);
+
+        TimeSeriesCollection dataset = generateDataset(Requirement::name, requirementsWorkedHours);
+        TimeSeries totalPersonAmount = createTimeSeries(person.getIdentifier(), totalWorkedHoursByPerson);
+
+        return buildChart("Requirements worked hours by " + person.getIdentifier(), dataset, totalPersonAmount);
+    }
+
+    private static <E> TimeSeriesCollection generateDataset(Function<E, String> seriesName, Map<E, Map<LocalDate, Integer>> workedHours) {
+        TimeSeriesCollection dataset = new TimeSeriesCollection();
+        workedHours.forEach((entity, workedHoursList) -> {
+            dataset.addSeries(createTimeSeries(seriesName.apply(entity), workedHoursList));
+        });
+        return dataset;
+    }
+
+    private static JFreeChart buildChart(String chartTitle, TimeSeriesCollection dataset, TimeSeries totalAmountSeries) {
+        JFreeChart chart = ChartFactory.createTimeSeriesChart(chartTitle, "Date", "Worked hours", dataset);
+        chart.setBackgroundPaint(Color.WHITE);
+
+        XYPlot plot = (XYPlot) chart.getPlot();
+        plot.setBackgroundPaint(new Color(219, 221, 226));
+        plot.setRangeGridlinePaint(Color.gray);
+        plot.setRangeCrosshairVisible(true);
+
+        XYItemRenderer renderer = plot.getRenderer();
+        for (int i = 0; i < plot.getSeriesCount(); i++) {
+            renderer.setSeriesStroke(i, new BasicStroke(1.75f));
         }
 
-        TimeInterval interval = new TimeInterval(allocations.get(firstIndex).getDay(), allocations.get(allocations.size()-1).getDay().plusDays(1));
-        result.put(interval, allocations.get(firstIndex).getHoursAmount());
+        buildTotalHoursChart(plot, totalAmountSeries);
 
-        return result;
+        DateAxis domainAxis = (DateAxis) plot.getDomainAxis();
+        domainAxis.setDateFormatOverride(new SimpleDateFormat("d/MM/yy"));
+        domainAxis.setVerticalTickLabels(true);
+        domainAxis.setTickUnit(new DateTickUnit(DateTickUnitType.DAY, 14));
+        return chart;
+    }
+
+    private static void buildTotalHoursChart(XYPlot plot, TimeSeries totalAmountSeries) {
+        XYItemRenderer clonedRender = null;
+        try {
+            clonedRender = (XYItemRenderer) ((XYLineAndShapeRenderer) plot.getRenderer()).clone();
+        } catch (CloneNotSupportedException e) {
+            e.printStackTrace();
+        }
+        clonedRender.setSeriesStroke(0, new BasicStroke(5f));
+        clonedRender.setSeriesPaint(0, new Color(255, 230, 171));
+
+        plot.setDataset(1, new TimeSeriesCollection(totalAmountSeries));
+        plot.setRenderer(1, clonedRender);
+    }
+
+    private static TimeSeries createTimeSeries(String seriesName, Map<LocalDate, Integer> allocationsList) {
+        TimeSeries series = new TimeSeries(seriesName);
+        allocationsList.forEach((date, value) -> {
+            series.add(convertToTime(date), value);
+        });
+
+        return series;
+    }
+
+    private static RegularTimePeriod convertToTime(LocalDate date) {
+        return new Day(Date.from(date.atStartOfDay(ZoneId.of("UTC")).toInstant()));
     }
 }
 
