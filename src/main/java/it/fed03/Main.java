@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -41,6 +42,7 @@ public class Main {
 
     public static void main(String[] args) {
         Set<Requirement> requirements = highDemand();
+
         Problem p = new Problem(requirements, 8, new EDFSchedulabilityAnalysis(), new EDFScheduleGenerator());
         List<Allocation> allocations = new ArrayList<>(p.generateSchedule());
 
@@ -49,19 +51,47 @@ public class Main {
         List<Person> people = allocationsSplit.stream().map(Allocation::getPerson).distinct().collect(Collectors.toList());
         people.forEach(person -> {
             JFreeChart chart = generatePersonWorkedHours(allocationsSplit, person);
-            saveChartToImage(chart, args[0]);
+            saveChartToImage(chart, args[0], 800, 480);
         });
 
         requirements.forEach(requirement -> {
             JFreeChart chart = generateRequirementWorkedHours(allocations, requirement);
-            saveChartToImage(chart, args[0]);
+            saveChartToImage(chart, args[0], 800, 480);
         });
 
         JFreeChart chart = generateTotalWorkedHours(allocations);
-        saveChartToImage(chart, args[0]);
+        saveChartToImage(chart, args[0], 640, 480);
     }
 
-    private static void saveChartToImage(JFreeChart chart, String folder) {
+    private static void highDemandTexFile(Set<Requirement> requirements) {
+        String result = "\\begin{itemize}\n";
+        int i = 1;
+        for (Requirement requirement: requirements.stream().sorted(Comparator.comparing(Requirement::name)).collect(Collectors.toList())) {
+            List<String> peopleName = requirement.assignedPeople().stream().map(Person::getIdentifier).sorted().collect(Collectors.toList());
+            result = result.concat(String.format("\\item Requirement %s - %s - %s ore - [%s;%s) - assegnato a %s\\\\\n",
+                    i,
+                    requirement.name(), requirement.computationTime(),
+                    requirement.timeInterval().getStartInclusive(), requirement.timeInterval().getEndExclusive(),
+                    String.join(", ", peopleName)
+            ));
+            result = result.concat("Assertion:\n\\begin{itemize}\n");
+            for (Assertion assertion: requirement.assertions()) {
+                result = result.concat(String.format("\\item %s ore - [%s;%s) - assegnato a %s\n", assertion.computationTime(), assertion.releaseTime(), assertion.deadline(), assertion.assignedPerson().getIdentifier()));
+            }
+            result = result.concat("\\end{itemize}\n");
+            i++;
+        }
+        result = result.concat("\\end{itemize}");
+
+        try {
+            Files.write(Paths.get("C:\\Users\\templ\\Google Drive\\tesi\\thesis-template\\files\\highDemandEx.tex"),
+                    result.getBytes(), StandardOpenOption.CREATE);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void saveChartToImage(JFreeChart chart, String folder, int width, int height) {
         Path folderPath = Paths.get(folder);
         if (!Files.exists(folderPath)) {
             try {
@@ -73,8 +103,6 @@ public class Main {
 
         String imageName = chart.getTitle().getText().toLowerCase().replace(" ", "_");
         File image = Paths.get(folder, imageName+".jpg").toFile();
-        int width = 800;
-        int height = 480;
         try {
             ChartUtilities.saveChartAsJPEG(image,1f, chart,width,height);
         } catch (IOException e) {
@@ -90,7 +118,7 @@ public class Main {
         TimeSeriesCollection peopleWorkedHoursDataset = generateDataset(Person::getIdentifier, peopleWorkedHours);
         TimeSeries totalWorkedHoursDataset = createTimeSeries("Total amount", totalWorkedHours);
 
-        return buildChart("Total worked hours by researcher", peopleWorkedHoursDataset, totalWorkedHoursDataset);
+        return buildChart("Total worked hours by researcher", peopleWorkedHoursDataset, totalWorkedHoursDataset, new DateTickUnit(DateTickUnitType.MONTH, 1));
     }
 
     private static Set<Requirement> highDemand() {
@@ -100,7 +128,7 @@ public class Main {
 
         // proj1
         Requirement proj1 = new Requirement(
-                "proj1",
+                "proj01",
                 986,
                 LocalDate.of(2017, 3, 1),
                 LocalDate.of(2017, 11, 23),
@@ -126,7 +154,7 @@ public class Main {
 
         // proj2
         Requirement proj2 = new Requirement(
-                "proj2",
+                "proj02",
                 403,
                 LocalDate.of(2017, 4, 1),
                 LocalDate.of(2017, 8, 31),
@@ -145,7 +173,7 @@ public class Main {
 
         // proj3
         Requirement proj3 = new Requirement(
-                "proj3",
+                "proj03",
                 765,
                 LocalDate.of(2017, 7, 1),
                 LocalDate.of(2018, 8, 31),
@@ -178,7 +206,7 @@ public class Main {
 
         // proj4
         Requirement proj4 = new Requirement(
-                "proj4",
+                "proj04",
                 1440,
                 LocalDate.of(2017, 5, 1),
                 LocalDate.of(2018, 5, 31),
@@ -204,7 +232,7 @@ public class Main {
 
         // proj5
         Requirement proj5 = new Requirement(
-                "proj5",
+                "proj05",
                 264,
                 LocalDate.of(2017, 10, 1),
                 LocalDate.of(2017, 12, 31),
@@ -223,7 +251,7 @@ public class Main {
 
         // proj6
         Requirement proj6 = new Requirement(
-                "proj6",
+                "proj06",
                 324,
                 LocalDate.of(2017, 11, 1),
                 LocalDate.of(2018, 11, 30),
@@ -249,7 +277,7 @@ public class Main {
 
         // proj7
         Requirement proj7 = new Requirement(
-                "proj7",
+                "proj07",
                 499,
                 LocalDate.of(2017, 12, 1),
                 LocalDate.of(2018, 3, 31),
@@ -275,7 +303,7 @@ public class Main {
 
         // proj8
         Requirement proj8 = new Requirement(
-                "proj8",
+                "proj08",
                 377,
                 LocalDate.of(2018, 1, 1),
                 LocalDate.of(2018, 5, 31),
@@ -301,7 +329,7 @@ public class Main {
 
         // proj9
         Requirement proj9 = new Requirement(
-                "proj9",
+                "proj09",
                 268,
                 LocalDate.of(2018, 3, 1),
                 LocalDate.of(2018, 7, 31),
@@ -546,6 +574,11 @@ public class Main {
     }
 
     private static JFreeChart buildChart(String chartTitle, TimeSeriesCollection dataset, TimeSeries totalAmountSeries) {
+        DateTickUnit tickUnit = new DateTickUnit(DateTickUnitType.DAY, 14);
+        return buildChart(chartTitle, dataset, totalAmountSeries, tickUnit);
+    }
+
+    private static JFreeChart buildChart(String chartTitle, TimeSeriesCollection dataset, TimeSeries totalAmountSeries, DateTickUnit tickUnit) {
         JFreeChart chart = ChartFactory.createTimeSeriesChart(chartTitle, "Date", "Worked hours", dataset);
         chart.setBackgroundPaint(Color.WHITE);
 
@@ -564,7 +597,7 @@ public class Main {
         DateAxis domainAxis = (DateAxis) plot.getDomainAxis();
         domainAxis.setDateFormatOverride(new SimpleDateFormat("d/MM/yy"));
         domainAxis.setVerticalTickLabels(true);
-        domainAxis.setTickUnit(new DateTickUnit(DateTickUnitType.DAY, 14));
+        domainAxis.setTickUnit(tickUnit);
         return chart;
     }
 
