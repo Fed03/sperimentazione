@@ -4,69 +4,118 @@ import it.unifi.cassandra.scheduling.Problem;
 import it.unifi.cassandra.scheduling.model.*;
 import it.unifi.cassandra.scheduling.solver.FEDScheduleGenerator;
 import it.unifi.cassandra.scheduling.solver.edf.EDFSchedulabilityAnalysis;
-import it.unifi.cassandra.scheduling.solver.edf.EDFScheduleGenerator;
-import it.unifi.cassandra.scheduling.util.ScheduleManager;
 import it.unifi.cassandra.scheduling.util.TimeInterval;
 import it.unifi.cassandra.scheduling.util.WorkingDays;
-import org.jfree.chart.ChartFactory;
-import org.jfree.chart.ChartFrame;
-import org.jfree.chart.ChartUtilities;
-import org.jfree.chart.JFreeChart;
-import org.jfree.chart.axis.DateAxis;
-import org.jfree.chart.axis.DateTickUnit;
-import org.jfree.chart.axis.DateTickUnitType;
-import org.jfree.chart.plot.XYPlot;
-import org.jfree.chart.renderer.xy.XYItemRenderer;
-import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
-import org.jfree.data.time.Day;
-import org.jfree.data.time.RegularTimePeriod;
-import org.jfree.data.time.TimeSeries;
-import org.jfree.data.time.TimeSeriesCollection;
 
-import java.awt.*;
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.text.SimpleDateFormat;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.*;
-import java.util.List;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class Main {
 
     public static void main(String[] args) {
         Set<Requirement> requirements = highDemand();
+        highDemandStatistics(requirements);
 
-        Problem p = new Problem(requirements, 8, new EDFSchedulabilityAnalysis(), new EDFScheduleGenerator());
-        List<Allocation> allocations = new ArrayList<>(p.generateSchedule());
+//        allocStatistics(requirements);
 
-        allocations.sort(Comparator.comparing(Allocation::getDay));
-        List<Allocation> allocationsSplit = allocations.subList(0, (int) Math.ceil(allocations.size() * 0.52));
-        List<Person> people = allocationsSplit.stream().map(Allocation::getPerson).distinct().collect(Collectors.toList());
-        people.forEach(person -> {
-            JFreeChart chart = generatePersonWorkedHours(allocationsSplit, person);
-            saveChartToImage(chart, args[0], 800, 480);
-        });
+//        GraphGenerator.generateDiagramFor(args[0], highDemand(), "edf");
+//        GraphGenerator.generateDiagramFor(args[0], highDemand(), "fed");
+    }
+
+    private static void allocStatistics(Set<Requirement> requirements) {
+        Problem p = new Problem(requirements, 8, new EDFSchedulabilityAnalysis(), new FEDScheduleGenerator());
+        Map<Person, List<Allocation>> alloc = p.generateSchedule().stream().sorted(Comparator.comparing(Allocation::getDay)).collect(Collectors.groupingBy(Allocation::getPerson, Collectors.toList()));
+
+        alloc.forEach(((person, allocations) -> {
+            if (Objects.equals(person.getIdentifier(), "researcher2")) {
+                Map<Assertion, List<Allocation>> allocByReq = allocations.stream().collect(Collectors.groupingBy(Allocation::assertion));
+                for (Assertion assertion : allocByReq.keySet().stream().sorted(Comparator.comparing(assertion -> assertion.requirement().name())).collect(Collectors.toList())) {
+                    List<Allocation> allocations1 = allocByReq.get(assertion);
+                    System.out.println(assertion.requirement().name() + ": " + assertion.computationTime());
+
+                    int totalCapacity = allocations1.size() * 8;
+                    int workedHours = allocations1.stream().mapToInt(Allocation::getHoursAmount).sum();
+                    double load = ((double) workedHours / totalCapacity);
+                    System.out.println("Load for " + assertion.requirement().name() + ": " + load);
+
+                    double wd = ((double) allocations1.size() / assertion.requirement().timeInterval().workingDays());
+
+                    System.out.println("WD for " + assertion.requirement().name() + ": " + wd);
+                }
+
+            }
+        }));
+
+        p.generateSchedule();
 
         requirements.forEach(requirement -> {
-            JFreeChart chart = generateRequirementWorkedHours(allocations, requirement);
-            saveChartToImage(chart, args[0], 800, 480);
-        });
+            if (requirement.name().equals("proj07")) {
+                Map<Person, List<Assertion>> assertionsByPerson = requirement.assertions().stream().collect(Collectors.groupingBy(Assertion::assignedPerson));
+                assertionsByPerson.forEach((person, assertions) -> {
+                    Assertion assertion = assertions.get(0);
+                    Set<Allocation> allocations = assertion.allocations();
+                    int totalCapacity = allocations.size() * 8;
+                    int workedHours = allocations.stream().mapToInt(Allocation::getHoursAmount).sum();
+                    double load = ((double) workedHours / totalCapacity);
+                    System.out.println(assertion.computationTime());
+                    System.out.println("Load for " + person.getIdentifier() + ": " + load);
 
-        JFreeChart chart = generateTotalWorkedHours(allocations);
-        saveChartToImage(chart, args[0], 640, 480);
+                    double wd = ((double) allocations.size() / assertion.requirement().timeInterval().workingDays());
+
+                    System.out.println("WD for " + assertion.requirement().name() + ": " + wd);
+                });
+            }
+        });
+    }
+
+    private static void highDemandStatistics(Set<Requirement> requirements) {
+        Map<Person, List<Assertion>> assertionByPerson = requirements.stream().flatMap(requirement -> requirement.assertions().stream()).collect(Collectors.groupingBy(Assertion::assignedPerson));
+        assertionByPerson.forEach((person, assertions) -> {
+            System.out.println("--------------------------------------------------");
+            System.out.println(person.getIdentifier());
+            LocalDate min = assertions.stream().map(Assertion::releaseTime).distinct().min(LocalDate::compareTo).get();
+            LocalDate max = assertions.stream().map(Assertion::deadline).distinct().max(LocalDate::compareTo).get();
+
+            System.out.println("Min: " + min);
+            System.out.println("Max: " + max);
+            int workingDays = WorkingDays.between(min, max);
+            int toBeAllocated = assertions.stream().mapToInt(Assertion::computationTime).sum();
+            System.out.println("Working Days: " + workingDays);
+            System.out.println("To be allocated: " + toBeAllocated);
+            System.out.println("Working rate: " + (double) toBeAllocated / (workingDays * 8));
+
+
+            int intersections = 0;
+            int intersectionsSize = 0;
+            List<Assertion> sorted = new ArrayList<>(assertions);
+            sorted.sort(Comparator.comparing(Assertion::releaseTime));
+            Assertion toCheck = sorted.remove(0);
+            while (sorted.size() > 0) {
+                for (Assertion assertion : sorted) {
+                    TimeInterval intersectInterval = toCheck.timeInterval().intersect(assertion.timeInterval());
+                    if (intersectInterval != null) {
+                        intersections++;
+                        intersectionsSize += intersectInterval.workingDays();
+                    }
+                }
+                toCheck = sorted.remove(0);
+            }
+
+            System.out.println("Intersections: " + intersections);
+            System.out.println("AVG Intersections size: " + (double) intersectionsSize / (double) intersections);
+            System.out.println("AVG Intersections per assertion: " + (double) intersections / (double) assertions.size());
+        });
     }
 
     private static void highDemandTexFile(Set<Requirement> requirements) {
         String result = "\\begin{itemize}\n";
         int i = 1;
-        for (Requirement requirement: requirements.stream().sorted(Comparator.comparing(Requirement::name)).collect(Collectors.toList())) {
+        for (Requirement requirement : requirements.stream().sorted(Comparator.comparing(Requirement::name)).collect(Collectors.toList())) {
             List<String> peopleName = requirement.assignedPeople().stream().map(Person::getIdentifier).sorted().collect(Collectors.toList());
             result = result.concat(String.format("\\item Requirement %s - %s - %s ore - [%s;%s) - assegnato a %s\\\\\n",
                     i,
@@ -75,7 +124,7 @@ public class Main {
                     String.join(", ", peopleName)
             ));
             result = result.concat("Assertion:\n\\begin{itemize}\n");
-            for (Assertion assertion: requirement.assertions()) {
+            for (Assertion assertion : requirement.assertions()) {
                 result = result.concat(String.format("\\item %s ore - [%s;%s) - assegnato a %s\n", assertion.computationTime(), assertion.releaseTime(), assertion.deadline(), assertion.assignedPerson().getIdentifier()));
             }
             result = result.concat("\\end{itemize}\n");
@@ -89,36 +138,6 @@ public class Main {
         } catch (IOException e) {
             e.printStackTrace();
         }
-    }
-
-    private static void saveChartToImage(JFreeChart chart, String folder, int width, int height) {
-        Path folderPath = Paths.get(folder);
-        if (!Files.exists(folderPath)) {
-            try {
-                Files.createDirectories(folderPath);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-
-        String imageName = chart.getTitle().getText().toLowerCase().replace(" ", "_");
-        File image = Paths.get(folder, imageName+".jpg").toFile();
-        try {
-            ChartUtilities.saveChartAsJPEG(image,1f, chart,width,height);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private static JFreeChart generateTotalWorkedHours(List<Allocation> allocations) {
-        ScheduleManager scheduleManager = new ScheduleManager(allocations);
-        Map<Person, Map<LocalDate, Integer>> peopleWorkedHours = scheduleManager.peopleTotalWorkedHours();
-        Map<LocalDate, Integer> totalWorkedHours = scheduleManager.totalWorkedHours();
-
-        TimeSeriesCollection peopleWorkedHoursDataset = generateDataset(Person::getIdentifier, peopleWorkedHours);
-        TimeSeries totalWorkedHoursDataset = createTimeSeries("Total amount", totalWorkedHours);
-
-        return buildChart("Total worked hours by researcher", peopleWorkedHoursDataset, totalWorkedHoursDataset, new DateTickUnit(DateTickUnitType.MONTH, 1));
     }
 
     private static Set<Requirement> highDemand() {
@@ -543,89 +562,5 @@ public class Main {
         return new HashSet<>(Arrays.asList(proj1, proj2, proj3, proj4, proj5, proj6, proj7, proj8, proj9, proj10, proj11, proj12, proj13, proj14, proj15, proj16, proj17));
     }
 
-    private static JFreeChart generateRequirementWorkedHours(List<Allocation> allocations, Requirement requirement) {
-        ScheduleManager scheduleManager = new ScheduleManager(allocations);
-        Map<Person, Map<LocalDate, Integer>> peopleWorkedHours = scheduleManager.peopleWorkedHoursByRequirement(requirement);
-        Map<LocalDate, Integer> totalWorkedHoursByRequirement = scheduleManager.totalWorkedHoursByRequirement(requirement);
-
-        TimeSeriesCollection peopleWorkedHoursDataset = generateDataset(Person::getIdentifier, peopleWorkedHours);
-        TimeSeries totalWorkedHoursDataset = createTimeSeries(requirement.name(), totalWorkedHoursByRequirement);
-
-        return buildChart(requirement.name() + " worked hours by researcher", peopleWorkedHoursDataset, totalWorkedHoursDataset);
-    }
-
-    private static JFreeChart generatePersonWorkedHours(List<Allocation> allocations, Person person) {
-        ScheduleManager scheduleManager = new ScheduleManager(allocations);
-        Map<Requirement, Map<LocalDate, Integer>> requirementsWorkedHours = scheduleManager.peopleWorkedHoursGroupedByRequirement(person);
-        Map<LocalDate, Integer> totalWorkedHoursByPerson = scheduleManager.personWorkedHours(person);
-
-        TimeSeriesCollection dataset = generateDataset(Requirement::name, requirementsWorkedHours);
-        TimeSeries totalPersonAmount = createTimeSeries(person.getIdentifier(), totalWorkedHoursByPerson);
-
-        return buildChart("Requirements worked hours by " + person.getIdentifier(), dataset, totalPersonAmount);
-    }
-
-    private static <E> TimeSeriesCollection generateDataset(Function<E, String> seriesName, Map<E, Map<LocalDate, Integer>> workedHours) {
-        TimeSeriesCollection dataset = new TimeSeriesCollection();
-        workedHours.forEach((entity, workedHoursList) -> {
-            dataset.addSeries(createTimeSeries(seriesName.apply(entity), workedHoursList));
-        });
-        return dataset;
-    }
-
-    private static JFreeChart buildChart(String chartTitle, TimeSeriesCollection dataset, TimeSeries totalAmountSeries) {
-        DateTickUnit tickUnit = new DateTickUnit(DateTickUnitType.DAY, 14);
-        return buildChart(chartTitle, dataset, totalAmountSeries, tickUnit);
-    }
-
-    private static JFreeChart buildChart(String chartTitle, TimeSeriesCollection dataset, TimeSeries totalAmountSeries, DateTickUnit tickUnit) {
-        JFreeChart chart = ChartFactory.createTimeSeriesChart(chartTitle, "Date", "Worked hours", dataset);
-        chart.setBackgroundPaint(Color.WHITE);
-
-        XYPlot plot = (XYPlot) chart.getPlot();
-        plot.setBackgroundPaint(new Color(219, 221, 226));
-        plot.setRangeGridlinePaint(Color.gray);
-        plot.setRangeCrosshairVisible(true);
-
-        XYItemRenderer renderer = plot.getRenderer();
-        for (int i = 0; i < plot.getSeriesCount(); i++) {
-            renderer.setSeriesStroke(i, new BasicStroke(1.75f));
-        }
-
-        buildTotalHoursChart(plot, totalAmountSeries);
-
-        DateAxis domainAxis = (DateAxis) plot.getDomainAxis();
-        domainAxis.setDateFormatOverride(new SimpleDateFormat("d/MM/yy"));
-        domainAxis.setVerticalTickLabels(true);
-        domainAxis.setTickUnit(tickUnit);
-        return chart;
-    }
-
-    private static void buildTotalHoursChart(XYPlot plot, TimeSeries totalAmountSeries) {
-        XYItemRenderer clonedRender = null;
-        try {
-            clonedRender = (XYItemRenderer) ((XYLineAndShapeRenderer) plot.getRenderer()).clone();
-        } catch (CloneNotSupportedException e) {
-            e.printStackTrace();
-        }
-        clonedRender.setSeriesStroke(0, new BasicStroke(5f));
-        clonedRender.setSeriesPaint(0, new Color(255, 230, 171));
-
-        plot.setDataset(1, new TimeSeriesCollection(totalAmountSeries));
-        plot.setRenderer(1, clonedRender);
-    }
-
-    private static TimeSeries createTimeSeries(String seriesName, Map<LocalDate, Integer> allocationsList) {
-        TimeSeries series = new TimeSeries(seriesName);
-        allocationsList.forEach((date, value) -> {
-            series.add(convertToTime(date), value);
-        });
-
-        return series;
-    }
-
-    private static RegularTimePeriod convertToTime(LocalDate date) {
-        return new Day(Date.from(date.atStartOfDay(ZoneId.of("UTC")).toInstant()));
-    }
 }
 
